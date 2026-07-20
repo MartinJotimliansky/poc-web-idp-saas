@@ -1,0 +1,23 @@
+app:
+  name: "Demo CIAM"
+  display_name: "PoC web IDP SaaS"
+  port: 3000
+  
+provider:
+  name: "transmit-security"
+  config:
+    journey_name: "0b898723-de26-4a38-96ec-2926bd039f02"
+    server_url: "https://api.transmitsecurity.io/ido"
+    token_url: "https://api.transmitsecurity.io/oidc/token"
+    auth_url: "https://api.transmitsecurity.io/cis/oidc/auth"
+    redirect_uri: "http://localhost:3000/login/callback"
+    scope: "openid datosmaestro.consultar"
+    
+journeys:
+  delete_user: "592a0a46-bc2e-4f61-a59f-94ce3d46ede8"
+
+supervielle:
+  api_url: "https://apitstpocidp.supervielle.com.ar/supervielletest/pocidp/apibank/datos-de-referencia/datos-maestros/api/v1/info/version"
+
+backend:
+  port: 3001
