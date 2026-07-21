@@ -5,6 +5,7 @@ import { IdoJourneyActionType, IdoServiceResponse, ClientResponseOptionType } fr
 import { SdkState } from './sdkState';
 import { getQueryParam } from './router';
 import { InformationComponent } from './components/informationComponent';
+import { dynatraceService } from './services/ObservabilityService';
 
 export class SsoJourneyExecutor {
   public async startSsoJourney(): Promise<void> {
@@ -28,7 +29,13 @@ export class SsoJourneyExecutor {
         throw new Error('El proveedor no soporta SSO Journey');
       }
 
-      const idoResponse = await provider.startSsoJourney(interactionId);
+      let correlationId: string | undefined;
+      if (dynatraceService.isReady()) {
+        correlationId = await dynatraceService.getCorrelationIdForTransmit('SSO Login Flow');
+        console.log('[SSO] Correlation ID de Dynatrace:', correlationId);
+      }
+
+      const idoResponse = await provider.startSsoJourney(interactionId, correlationId ? { correlationId } : undefined);
       let debugPin: string | undefined;
 
       if (this.isJourneyActive(idoResponse.journeyStepId)) {
@@ -47,7 +54,14 @@ export class SsoJourneyExecutor {
 
     try {
       const provider = getActiveProvider();
-      const idoResponse = await provider.startJourney(journeyId);
+      
+      let correlationId: string | undefined;
+      if (dynatraceService.isReady()) {
+        correlationId = await dynatraceService.getCorrelationIdForTransmit('Login Flow');
+        console.log('[Journey] Correlation ID de Dynatrace:', correlationId);
+      }
+
+      const idoResponse = await provider.startJourney(journeyId, correlationId ? { correlationId } : undefined);
       let debugPin: string | undefined;
 
       if (this.isJourneyActive(idoResponse.journeyStepId)) {

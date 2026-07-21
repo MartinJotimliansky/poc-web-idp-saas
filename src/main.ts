@@ -4,6 +4,7 @@ import { initApp, getConfig } from './app';
 import { registerRoute, navigate, getCurrentPath } from './router';
 import { SsoJourneyExecutor } from './ssoJourneyExecutor';
 import { CallbackHandler } from './callbackHandler';
+import { dynatraceService } from './services/ObservabilityService';
 
 registerRoute('/login', async () => {
   console.log('[Router] Ruta: /login (SSO Journey Hub)');
@@ -28,6 +29,20 @@ registerRoute('/', async () => {
 
 document.addEventListener('DOMContentLoaded', async function () {
   const { config } = await initApp();
+
+  try {
+    await dynatraceService.initialize({
+      endpointURL: config.dynatrace.endpoint_url,
+      applicationID: config.dynatrace.application_id,
+      deviceID: config.dynatrace.device_id,
+      manufacturer: 'Supervielle',
+      modelId: 'Web-POC',
+    });
+    dynatraceService.createSession();
+    console.info('[Dynatrace] Inicializado y sesión creada.');
+  } catch (e: any) {
+    console.warn('[Dynatrace] No se pudo inicializar:', e.message);
+  }
 
   revealApplication();
   updateJourneyNameDisplay(config.app.display_name);

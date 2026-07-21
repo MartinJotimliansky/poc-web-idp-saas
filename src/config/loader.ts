@@ -14,6 +14,11 @@ export interface AppConfig {
   supervielle: {
     api_url: string;
   };
+  dynatrace: {
+    endpoint_url: string;
+    application_id: string;
+    device_id: number;
+  };
   backend: {
     port: number;
   };

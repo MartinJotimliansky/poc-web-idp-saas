@@ -7,7 +7,7 @@ export interface IdentityProvider {
   
   startJourney(journeyId: string, options?: { additionalParams?: any; correlationId?: string }): Promise<IdoServiceResponse>;
   
-  startSsoJourney?(interactionId: string): Promise<IdoServiceResponse>;
+  startSsoJourney?(interactionId: string, options?: { correlationId?: string }): Promise<IdoServiceResponse>;
   
   submitClientResponse(
     optionId: ClientResponseOptionType | string,

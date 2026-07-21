@@ -25,7 +25,10 @@ export class TransmitSecurityProvider implements IdentityProvider {
     return window.tsPlatform.ido.startJourney(journeyId, options || {});
   }
 
-  async startSsoJourney(interactionId: string): Promise<IdoServiceResponse> {
+  async startSsoJourney(interactionId: string, options?: { correlationId?: string }): Promise<IdoServiceResponse> {
+    if (options?.correlationId) {
+      console.info('[Transmit] SSO Journey con correlationId:', options.correlationId);
+    }
     return window.tsPlatform.ido.startSsoJourney(interactionId);
   }
 

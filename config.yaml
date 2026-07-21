@@ -19,5 +19,10 @@ journeys:
 supervielle:
   api_url: "https://apitstpocidp.supervielle.com.ar/supervielletest/pocidp/apibank/datos-de-referencia/datos-maestros/api/v1/info/version"
 
+dynatrace:
+  endpoint_url: "https://bf90770dpq.bf.dynatrace.com/mbeacon"
+  application_id: "2cc8df87-b1d5-44e8-8252-1949bc53d8df"
+  device_id: 1000
+
 backend:
   port: 3001

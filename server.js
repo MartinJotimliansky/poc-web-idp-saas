@@ -143,6 +143,7 @@ app.get('/api/config', (req, res) => {
     },
     journeys: config.journeys,
     supervielle: config.supervielle,
+    dynatrace: config.dynatrace,
     backend: config.backend,
   });
 });
