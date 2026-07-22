@@ -153,8 +153,6 @@ export class LoginForm1StepHandler implements StepHandler {
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
 
-        commonHelpers.markJourneyStarted();
-
         submitStep({
           options: this.getClientResponseOptions(formId),
           data,

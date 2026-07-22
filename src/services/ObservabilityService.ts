@@ -1,9 +1,6 @@
 import {
   OpenKitBuilder,
   type OpenKit,
-  type Session,
-  type Action,
-  type WebRequestTracer,
   type InitCallback,
 } from '@dynatrace/openkit-js';
 
@@ -19,13 +16,6 @@ export interface DynatraceConfig {
   initTimeoutMs?: number;
 }
 
-export interface CorrelationResult {
-  correlationId: string;
-  dynatraceTag: string;
-  action: Action;
-  webRequestTracer: WebRequestTracer;
-}
-
 const DEFAULT_INIT_TIMEOUT_MS = 10_000;
 const DEFAULT_CLIENT_IP = '127.0.0.1';
 
@@ -33,8 +23,6 @@ export class DynatraceService {
   private static instance: DynatraceService | null = null;
 
   private openKit: OpenKit | null = null;
-  private session: Session | null = null;
-  private activeAction: Action | null = null;
   private initialized = false;
   private config: DynatraceConfig | null = null;
 
@@ -83,100 +71,34 @@ export class DynatraceService {
     console.info('[Dynatrace] OpenKit inicializado correctamente.');
   }
 
-  createSession(clientIP?: string): Session {
+  createSession(clientIP?: string): void {
     this.ensureReady();
 
     const ip = clientIP ?? this.config?.defaultClientIP ?? DEFAULT_CLIENT_IP;
-    this.session = this.openKit!.createSession(ip);
-
+    this.openKit!.createSession(ip);
     console.info('[Dynatrace] Sesión creada para IP:', ip);
-    return this.session;
-  }
-
-  async identifyUser(userId: string): Promise<void> {
-    this.ensureSession();
-
-    const hashedId = await this.hashUserId(userId);
-    this.session!.identifyUser(hashedId);
-
-    console.info('[Dynatrace] Usuario identificado (hashed):', hashedId.substring(0, 12) + '...');
-  }
-
-  async startLoginCorrelation(
-    actionName = 'Login Flow',
-    traceURL?: string
-  ): Promise<CorrelationResult> {
-    this.ensureSession();
-
-    this.activeAction = this.session!.enterAction(actionName);
-
-    const url = traceURL ?? this.buildLoginTraceURL();
-    const webRequestTracer = this.activeAction.traceWebRequest(url);
-    webRequestTracer.start();
-
-    const dynatraceTag = webRequestTracer.getTag();
-    const correlationId = dynatraceTag || this.generateFallbackCorrelationId();
-
-    console.info('[Dynatrace] Correlation ID generado:', correlationId);
-
-    return {
-      correlationId,
-      dynatraceTag,
-      action: this.activeAction,
-      webRequestTracer,
-    };
-  }
-
-  getActiveAction(): Action | null {
-    return this.activeAction;
-  }
-
-  getActiveSession(): Session | null {
-    return this.session;
   }
 
   async getCorrelationIdForTransmit(
     actionName = 'Login Flow',
     traceURL?: string
   ): Promise<string> {
-    const result = await this.startLoginCorrelation(actionName, traceURL);
-    return result.correlationId;
-  }
+    this.ensureReady();
 
-  leaveAction(): void {
-    if (this.activeAction) {
-      this.activeAction.leaveAction();
-      this.activeAction = null;
-      console.info('[Dynatrace] Acción finalizada.');
-    }
-  }
+    const session = this.openKit!.createSession(
+      this.config?.defaultClientIP ?? DEFAULT_CLIENT_IP
+    );
+    const action = session.enterAction(actionName);
 
-  endSession(): void {
-    if (this.session) {
-      this.leaveAction();
-      this.session.end();
-      this.session = null;
-      console.info('[Dynatrace] Sesión finalizada.');
-    }
-  }
+    const url = traceURL ?? this.buildLoginTraceURL();
+    const webRequestTracer = action.traceWebRequest(url);
+    webRequestTracer.start();
 
-  shutdown(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      if (!this.openKit) {
-        resolve();
-        return;
-      }
+    const dynatraceTag = webRequestTracer.getTag();
+    const correlationId = dynatraceTag || this.generateFallbackCorrelationId();
+    console.info('[Dynatrace] Correlation ID generado:', correlationId);
 
-      this.endSession();
-
-      this.openKit.shutdown(() => {
-        this.openKit = null;
-        this.initialized = false;
-        DynatraceService.instance = null;
-        console.info('[Dynatrace] Shutdown completo.');
-        resolve();
-      });
-    });
+    return correlationId;
   }
 
   isReady(): boolean {
@@ -199,14 +121,6 @@ export class DynatraceService {
 
       this.openKit!.waitForInit(callback, timeoutMs);
     });
-  }
-
-  private async hashUserId(userId: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(userId);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
   }
 
   private detectOS(): string {
@@ -241,15 +155,6 @@ export class DynatraceService {
     if (!this.initialized || !this.openKit) {
       throw new Error(
         '[Dynatrace] OpenKit no inicializado. Llama a initialize() primero.'
-      );
-    }
-  }
-
-  private ensureSession(): void {
-    this.ensureReady();
-    if (!this.session) {
-      throw new Error(
-        '[Dynatrace] No hay sesión activa. Llama a createSession() primero.'
       );
     }
   }

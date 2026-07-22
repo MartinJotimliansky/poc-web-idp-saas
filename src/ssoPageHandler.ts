@@ -7,17 +7,28 @@ import { getQueryParam } from './router';
 import { InformationComponent } from './components/informationComponent';
 import { dynatraceService } from './services/ObservabilityService';
 
-export class SsoJourneyExecutor {
-  public async startSsoJourney(): Promise<void> {
+const MOBILE_DEEP_LINK = 'com.supervielle-poc.app://callback';
+
+export class SsoPageHandler {
+  public async handle(): Promise<void> {
     const interactionId =
       getQueryParam('src_interaction') ||
       getQueryParam('interaction_id') ||
       getQueryParam('interactionId');
 
     if (!interactionId) {
-      window.location.href = '/';
+      setMainContent(sanitizeHtml(InformationComponent(
+        'Error',
+        'No se recibió interactionId. La URL debe contener ?interactionId=X',
+        'Volver',
+        'restart-btn',
+        'error',
+      )));
+      this.attachRestartListener();
       return;
     }
+
+    const isMobile = this.detectMobile();
 
     try {
       const provider = getActiveProvider();
@@ -28,7 +39,7 @@ export class SsoJourneyExecutor {
 
       let correlationId: string | undefined;
       if (dynatraceService.isReady()) {
-        correlationId = await dynatraceService.getCorrelationIdForTransmit('SSO Login Flow');
+        correlationId = await dynatraceService.getCorrelationIdForTransmit('SSO Page Login Flow');
       }
 
       const idoResponse = await provider.startSsoJourney(interactionId, correlationId ? { correlationId } : undefined);
@@ -38,52 +49,42 @@ export class SsoJourneyExecutor {
         debugPin = await window.tsPlatform.ido.generateDebugPin();
       }
 
-      await this.executeJourney(idoResponse, debugPin);
+      await this.executeJourney(idoResponse, debugPin, isMobile);
     } catch (e: any) {
-      console.error('[SSO] Error al iniciar SSO Journey:', e);
-      await StepHandlers[UiStepType.Error].handle(e);
+      setMainContent(sanitizeHtml(InformationComponent(
+        'Error de autenticación',
+        e.message || 'Error inesperado durante el proceso de SSO.',
+        'Reintentar',
+        'retry-btn',
+        'error',
+      )));
+      this.attachRetryListener();
     }
   }
 
-  public async startJourneyWithId(journeyId: string): Promise<void> {
-    try {
-      const provider = getActiveProvider();
-      
-      let correlationId: string | undefined;
-      if (dynatraceService.isReady()) {
-        correlationId = await dynatraceService.getCorrelationIdForTransmit('Login Flow');
-      }
+  private detectMobile(): boolean {
+    const targetParam = getQueryParam('target');
+    if (targetParam === 'mobile') return true;
 
-      const idoResponse = await provider.startJourney(journeyId, correlationId ? { correlationId } : undefined);
-      let debugPin: string | undefined;
-
-      if (this.isJourneyActive(idoResponse.journeyStepId)) {
-        debugPin = await window.tsPlatform.ido.generateDebugPin();
-      }
-
-      await this.executeJourney(idoResponse, debugPin);
-    } catch (e: any) {
-      console.error('[Journey] Error al iniciar Journey:', e);
-      await StepHandlers[UiStepType.Error].handle(e);
-    }
+    return false;
   }
 
-  private async executeJourney(idoResponse: IdoServiceResponse | undefined, debugPin: string | undefined): Promise<void> {
-    try {
-      do {
-        await SdkState.setState(debugPin);
-        this.setDebugPin(debugPin);
+  private async executeJourney(
+    idoResponse: IdoServiceResponse | undefined,
+    debugPin: string | undefined,
+    isMobile: boolean,
+  ): Promise<void> {
+    do {
+      await SdkState.setState(debugPin);
+      this.setDebugPin(debugPin);
 
-        idoResponse = await this.handleJourneyStep(idoResponse);
-      } while (idoResponse);
-    } catch (e: any) {
-      console.error('[SSO] Error durante la ejecucion del journey:', e);
-      await StepHandlers[UiStepType.Error].handle(e);
-    }
+      idoResponse = await this.handleJourneyStep(idoResponse, isMobile);
+    } while (idoResponse);
   }
 
   private async handleJourneyStep(
     idoResponse: IdoServiceResponse | undefined,
+    isMobile: boolean,
   ): Promise<IdoServiceResponse | undefined> {
     if (!idoResponse) {
       throw new Error('No response');
@@ -95,7 +96,7 @@ export class SsoJourneyExecutor {
     }
 
     if (stepId === IdoJourneyActionType.Success) {
-      this.handleSuccess(idoResponse);
+      this.handleSuccess(idoResponse, isMobile);
       return;
     }
 
@@ -104,35 +105,56 @@ export class SsoJourneyExecutor {
       return;
     }
 
-    console.debug(`[SSO] handle journey step ${stepId}`);
     const handler = StepHandlers[stepId];
     if (!handler) {
-      throw new Error(
-        `No handler for journey step ${stepId}.`,
-      );
+      throw new Error(`No handler for journey step ${stepId}.`);
     }
 
     const uiResponse = await handler.handle(idoResponse);
-
-    if (!uiResponse) {
-      return;
-    }
+    if (!uiResponse) return;
 
     const provider = getActiveProvider();
     const optionId = this.resolveOptionId(uiResponse.options, idoResponse);
     return provider.submitClientResponse(optionId, uiResponse.data);
   }
 
-  private handleSuccess(response: IdoServiceResponse): void {
-    if (response.data?.json_data) {
-      sessionStorage.setItem('ssoJourneyData', JSON.stringify(response.data.json_data));
+  private handleSuccess(response: IdoServiceResponse, isMobile: boolean): void {
+    const jsonData = response.data?.json_data;
+    const redirectUrl = response.redirectUrl;
+
+    if (jsonData) {
+      sessionStorage.setItem('ssoJourneyData', JSON.stringify(jsonData));
     }
 
-    const redirectUrl = response.redirectUrl;
+    if (isMobile && redirectUrl) {
+      const codeFromUrl = this.extractCodeFromUrl(redirectUrl);
+      if (codeFromUrl) {
+        const deepLink = `${MOBILE_DEEP_LINK}?code=${encodeURIComponent(codeFromUrl)}`;
+        window.location.href = deepLink;
+        return;
+      }
+    }
+
     if (redirectUrl) {
       window.location.href = redirectUrl;
     } else {
-      setMainContent(sanitizeHtml(InformationComponent('Journey Completado', 'El journey finalizo correctamente.', '', '')));
+      setMainContent(sanitizeHtml(InformationComponent(
+        'Error',
+        'No se recibió URL de redirección del journey.',
+        'Volver',
+        'restart-btn',
+        'error',
+      )));
+      this.attachRestartListener();
+    }
+  }
+
+  private extractCodeFromUrl(url: string): string | null {
+    try {
+      const parsed = new URL(url);
+      return parsed.searchParams.get('code');
+    } catch {
+      return null;
     }
   }
 
@@ -172,5 +194,15 @@ export class SsoJourneyExecutor {
         });
       }
     }
+  }
+
+  private attachRestartListener(): void {
+    const btn = getElement<HTMLButtonElement>('#restart-btn');
+    btn?.addEventListener('click', () => { window.location.href = '/'; });
+  }
+
+  private attachRetryListener(): void {
+    const btn = getElement<HTMLButtonElement>('#retry-btn');
+    btn?.addEventListener('click', () => window.location.reload());
   }
 }

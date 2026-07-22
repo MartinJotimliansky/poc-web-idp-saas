@@ -44,20 +44,6 @@ export function clearStoredAccessToken() {
   sessionStorage.removeItem('idoAccessToken');
 }
 
-let journeyStartTime: number | undefined;
-
-export function markJourneyStarted(startTime = performance.now()) {
-  journeyStartTime = startTime;
-}
-
-export function getJourneyDurationMs(now = performance.now()) {
-  if (journeyStartTime === undefined) {
-    return undefined;
-  }
-
-  return Math.round(now - journeyStartTime);
-}
-
 export function restartApp() {
   SdkState.clearSessionStorage();
   clearStoredAccessToken();

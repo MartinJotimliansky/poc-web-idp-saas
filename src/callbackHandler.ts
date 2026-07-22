@@ -20,6 +20,10 @@ export class CallbackHandler {
   private tokenEndpointResponse: string = '';
   private supervielleResponse: string = '';
   private supervielleLatencyMs: number | undefined;
+  private tokenExchangeLatencyMs: number | undefined;
+  private introspectionTimingsMs: number[] = [];
+  private introspectionResponses: string[] = [];
+  private introspectionStatusCodes: number[] = [];
 
   public async handle(): Promise<void> {
     this.render();
@@ -64,11 +68,13 @@ export class CallbackHandler {
         body.journey_token = journeyToken;
       }
 
+      const exchangeStart = performance.now();
       const response = await fetch('/api/auth/callback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      this.tokenExchangeLatencyMs = Math.round(performance.now() - exchangeStart);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -93,27 +99,39 @@ export class CallbackHandler {
 
   private async callSupervielle(accessToken: string): Promise<void> {
     try {
+      const storedRequestsNumber = sessionStorage.getItem('requestsNumber');
+      const requestsNumber = storedRequestsNumber ? parseInt(storedRequestsNumber, 10) : 1;
+
       const start = performance.now();
-      const response = await fetch('/api/introspection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: accessToken }),
-      });
+      
+      for (let i = 0; i < requestsNumber; i++) {
+        const requestStart = performance.now();
+        const response = await fetch('/api/introspection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: accessToken }),
+        });
 
-      this.supervielleLatencyMs = Math.round(performance.now() - start);
+        const latency = Math.round(performance.now() - requestStart);
+        this.introspectionTimingsMs.push(latency);
+        this.introspectionStatusCodes.push(response.status);
 
-      const rawText = await response.text();
-      let data: any;
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        this.supervielleResponse = rawText || `HTTP ${response.status}`;
-        this.state = 'success';
-        this.render();
-        return;
+        const rawText = await response.text();
+        let data: any;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          this.introspectionResponses.push(rawText || `HTTP ${response.status}`);
+          continue;
+        }
+
+        const formatted = typeof data.body === 'string' ? data.body : JSON.stringify(data, null, 2);
+        this.introspectionResponses.push(formatted);
       }
 
-      this.supervielleResponse = typeof data.body === 'string' ? data.body : JSON.stringify(data, null, 2);
+      this.supervielleLatencyMs = Math.round(performance.now() - start);
+      this.supervielleResponse = this.introspectionResponses[this.introspectionResponses.length - 1] || '';
+      
       this.state = 'success';
       this.render();
     } catch (err: any) {
@@ -153,27 +171,45 @@ export class CallbackHandler {
 
   private renderSuccess(): string {
     let content = '';
+    const metrics: string[] = [];
 
     const journeyDataRaw = sessionStorage.getItem('ssoJourneyData');
     if (journeyDataRaw) {
       try {
         const journeyData = JSON.parse(journeyDataRaw);
-        const metrics: string[] = [];
-        if (journeyData.total_time !== undefined) {
-          metrics.push(`<div><strong>Tiempo total:</strong> ${journeyData.total_time} ms</div>`);
+        if (journeyData.total_time !== undefined && journeyData.request_latency !== undefined) {
+          const journeyTimeWithoutToken = journeyData.total_time - journeyData.request_latency;
+          metrics.push(`<div><strong>Tiempo journey (sin token):</strong> ${journeyTimeWithoutToken} ms</div>`);
+        } else if (journeyData.total_time !== undefined) {
+          metrics.push(`<div><strong>Tiempo total journey:</strong> ${journeyData.total_time} ms</div>`);
         }
         if (journeyData.request_latency !== undefined) {
           metrics.push(`<div><strong>Latencia API token:</strong> ${journeyData.request_latency} ms</div>`);
         }
-        if (this.supervielleLatencyMs !== undefined) {
-          metrics.push(`<div><strong>Latencia API Supervielle:</strong> ${this.supervielleLatencyMs} ms</div>`);
-        }
-        if (metrics.length > 0) {
-          content += `<div class="alert info"><div class="metrics">${metrics.join('')}</div></div>`;
-        }
-      } catch {
-      }
+      } catch {}
       sessionStorage.removeItem('ssoJourneyData');
+    }
+
+    if (metrics.length === 0) {
+      if (this.tokenExchangeLatencyMs !== undefined) {
+        metrics.push(`<div><strong>Token exchange:</strong> ${this.tokenExchangeLatencyMs} ms</div>`);
+      }
+    }
+
+    if (this.supervielleLatencyMs !== undefined) {
+      metrics.push(`<div><strong>Latencia total API Supervielle (${this.introspectionTimingsMs.length} llamadas):</strong> ${this.supervielleLatencyMs} ms</div>`);
+      
+      if (this.introspectionTimingsMs.length > 1) {
+        const timingsList = this.introspectionTimingsMs.map((t, i) => {
+          const statusCode = this.introspectionStatusCodes[i];
+          return `<div style="padding-left: 15px;">Llamada ${i + 1}: ${t} ms (HTTP ${statusCode})</div>`;
+        }).join('');
+        metrics.push(`<div style="margin-top: 8px;"><strong>Detalle por llamada:</strong>${timingsList}</div>`);
+      }
+    }
+
+    if (metrics.length > 0) {
+      content += `<div class="alert info"><div class="metrics">${metrics.join('')}</div></div>`;
     }
 
     if (this.tokenEndpointResponse) {

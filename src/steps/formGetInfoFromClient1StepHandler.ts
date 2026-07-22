@@ -124,7 +124,9 @@ export class FormGetInfoFromClient1StepHandler implements StepHandler {
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
 
-        commonHelpers.markJourneyStarted();
+        if (data.requestsNumber) {
+          sessionStorage.setItem('requestsNumber', String(data.requestsNumber));
+        }
 
         submitStep({
           options: this.getClientResponseOptions(formId),
